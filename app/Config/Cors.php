@@ -34,7 +34,7 @@ class Cors extends BaseConfig
          *   - ['http://localhost:8080']
          *   - ['https://www.example.com']
          */
-        'allowedOrigins' => ['http://localhost:3000'],
+        'allowedOrigins' => ['http://localhost:7000'],
 
         // (continued below) — see allowedOriginsPatterns for any local dev port
 

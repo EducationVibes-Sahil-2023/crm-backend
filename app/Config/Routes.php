@@ -66,6 +66,12 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     $routes->post('platform/demos/book', 'Api\Platform::bookDemo');
     $routes->post('platform/demos', 'Api\Platform::saveDemos');
 
+    // Generic per-workspace JSON store — replaces front-end localStorage.
+    $routes->get('store', 'Api\Store::index');
+    $routes->get('store/(:segment)', 'Api\Store::show/$1');
+    $routes->put('store/(:segment)', 'Api\Store::update/$1');
+    $routes->delete('store/(:segment)', 'Api\Store::delete/$1');
+
     // Multi-tenant provisioning — a dedicated database per client workspace
     $routes->get('tenants', 'Api\Tenants::index');
     $routes->post('tenants/provision', 'Api\Tenants::provision');

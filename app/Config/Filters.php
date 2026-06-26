@@ -130,6 +130,9 @@ class Filters extends BaseFilters
                 'api/users/*',
                 'api/tenants',
                 'api/tenants/*',
+                // Generic JSON store (all app data)
+                'api/store',
+                'api/store/*',
                 // Gmail — all except callback (Google's redirect carries no bearer)
                 'api/gmail/status',
                 'api/gmail/config',
