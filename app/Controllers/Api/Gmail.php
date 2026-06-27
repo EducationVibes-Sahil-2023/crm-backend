@@ -3,6 +3,7 @@
 namespace App\Controllers\Api;
 
 use App\Libraries\GmailService;
+use App\Libraries\Jwt;
 use CodeIgniter\RESTful\ResourceController;
 
 /**
@@ -21,9 +22,28 @@ class Gmail extends ResourceController
         return new GmailService();
     }
 
+    /**
+     * The connecting user's id. Normally set by the JWT `auth` filter
+     * ($request->jwtUserId). Falls back to decoding the Bearer token directly —
+     * so this works even on deployments where the filter's URI patterns don't
+     * match the routes (e.g. the API is mounted under a subfolder). Without this,
+     * authUrl() would build a state with an empty user id and the callback would
+     * fail with reason=no_user ("sign-in didn't complete").
+     */
     private function userId(): string
     {
-        return (string) ($this->request->jwtUserId ?? '');
+        $id = (string) ($this->request->jwtUserId ?? '');
+        if ($id !== '') {
+            return $id;
+        }
+        $header = $this->request->getHeaderLine('Authorization');
+        if (preg_match('/Bearer\s+(.+)/i', $header, $m)) {
+            $claims = Jwt::decode(trim($m[1]));
+            if (is_array($claims)) {
+                return (string) ($claims['sub'] ?? '');
+            }
+        }
+        return '';
     }
 
     /** GET /api/gmail/status -> { configured, connected, email } */
