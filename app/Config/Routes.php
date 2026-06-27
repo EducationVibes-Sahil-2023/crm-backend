@@ -58,8 +58,14 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     // AI assistant — server-side relay to Claude (keeps the API key secret)
     $routes->post('ai/chat', 'Api\Ai::chat');
 
-    // Super admin — exchange console credentials for a JWT (sub: super-admin)
-    $routes->post('super-admin/token', 'Api\SuperAdmin::token');
+    // Super admin — DB-backed platform-owner auth (creds in `settings`, not .env)
+    $routes->post('super-admin/login', 'Api\SuperAdmin::login');         // validate + mint JWT
+    $routes->post('super-admin/token', 'Api\SuperAdmin::token');         // back-compat alias
+    $routes->post('super-admin/credentials', 'Api\SuperAdmin::credentials'); // change creds (re-auth)
+
+    // Web-triggered deploy bootstrap (no-CLI): create DB + run migrations + seed.
+    // Guarded by ?key=<setup.key>. Hit it after each deploy to auto-update schema.
+    $routes->get('setup', 'Api\Setup::run');
 
     // Platform config (branding/plans/permissions/…) + landing demos, DB-backed.
     // Reading config is public (landing branding); writes are guarded in-controller.
