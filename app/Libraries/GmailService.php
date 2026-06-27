@@ -17,6 +17,9 @@ class GmailService
     private string $clientSecret;
     private string $redirectUri;
 
+    /** Reason the last OAuth code exchange failed (e.g. invalid_client), for diagnostics. */
+    private string $lastError = '';
+
     private const AUTH_URL  = 'https://accounts.google.com/o/oauth2/v2/auth';
     private const TOKEN_URL = 'https://oauth2.googleapis.com/token';
     private const USERINFO  = 'https://www.googleapis.com/oauth2/v2/userinfo';
@@ -78,6 +81,30 @@ class GmailService
         ];
     }
 
+    /**
+     * Full diagnostic view (no secret value) so an operator can verify what the
+     * server is actually using in production. `secretTail` is the last 5 chars
+     * only — enough to tell WHICH secret is loaded without exposing it.
+     */
+    public function diagnostics(): array
+    {
+        $saved = Settings::get(self::SETTINGS_KEY);
+        $fromDb = is_array($saved) && ($saved['clientId'] ?? '') !== '';
+
+        return [
+            'configured'    => $this->isConfigured(),
+            'source'        => $fromDb ? 'database (settings table — overrides .env)' : '.env fallback',
+            'clientId'      => $this->clientId,
+            'redirectUri'   => $this->redirectUri,
+            'hasSecret'     => $this->clientSecret !== '',
+            'secretTail'    => $this->clientSecret !== '' ? '…' . substr($this->clientSecret, -5) : '(none)',
+            'frontendUrl'   => (string) (env('app.frontendUrl') ?? ''),
+            'baseUrl'       => (string) (env('app.baseURL') ?? ''),
+            'scopes'        => self::SCOPES,
+            'expectedRedirectForThisDomain' => 'add this exact value to Google Cloud → Authorized redirect URIs',
+        ];
+    }
+
     // ---------- OAuth ----------
 
     public function authUrl(string $state): string
@@ -94,6 +121,12 @@ class GmailService
         ]);
     }
 
+    /** The reason the last exchangeCode() failed (Google error code), if any. */
+    public function lastError(): string
+    {
+        return $this->lastError;
+    }
+
     /** Exchange an authorization code for tokens and persist them for $userId. */
     public function exchangeCode(string $userId, string $code): bool
     {
@@ -105,6 +138,13 @@ class GmailService
             'grant_type'    => 'authorization_code',
         ], false);
         if (!isset($res['access_token'])) {
+            // Surface the real cause (invalid_client, redirect_uri_mismatch, …) so
+            // the callback can report it instead of a silent failure.
+            $this->lastError = (string) ($res['error'] ?? 'token_exchange_failed');
+            log_message('error', 'Gmail OAuth exchange failed: {err} {desc}', [
+                'err'  => $this->lastError,
+                'desc' => (string) ($res['error_description'] ?? ''),
+            ]);
             return false;
         }
         $tokens = [

@@ -67,6 +67,9 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     // Guarded by ?key=<setup.key>. Hit it after each deploy to auto-update schema.
     $routes->get('setup', 'Api\Setup::run');
 
+    // Gmail/Calendar OAuth diagnostics (key-guarded, no secret leak).
+    $routes->get('gmail/diagnose', 'Api\Gmail::diagnose');
+
     // Platform config (branding/plans/permissions/…) + landing demos, DB-backed.
     // Reading config is public (landing branding); writes are guarded in-controller.
     $routes->get('platform', 'Api\Platform::index');

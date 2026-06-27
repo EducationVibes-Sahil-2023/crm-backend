@@ -38,6 +38,23 @@ class Gmail extends ResourceController
         return $this->respond($this->gmail()->publicConfig());
     }
 
+    /**
+     * GET /api/gmail/diagnose?key=<setup.key>
+     * Key-guarded (no JWT). Shows the effective OAuth config the server uses —
+     * which secret (last 5 chars only), redirect URI, DB vs .env source — so you
+     * can verify production from a browser without reading logs. No secret leaks.
+     */
+    public function diagnose()
+    {
+        $key      = (string) ($this->request->getGet('key') ?? '');
+        $expected = (string) (env('setup.key') ?: '');
+        if ($expected === '' || ! hash_equals($expected, $key)) {
+            return $this->failUnauthorized('Invalid or missing key.');
+        }
+
+        return $this->respond($this->gmail()->diagnostics());
+    }
+
     /** POST /api/gmail/config { clientId, clientSecret?, redirectUri? } — admin sets the OAuth app. */
     public function saveConfig()
     {
@@ -83,9 +100,15 @@ class Gmail extends ResourceController
             }
         }
 
-        $ok = $code !== '' && $userId !== '' && $this->gmail()->exchangeCode($userId, $code);
+        $svc    = $this->gmail();
+        $ok     = $code !== '' && $userId !== '' && $svc->exchangeCode($userId, $code);
+        $reason = $ok ? '' : ($svc->lastError() ?: ($code === '' ? 'no_code' : ($userId === '' ? 'no_user' : 'failed')));
 
-        return redirect()->to($front . $return . '?connected=' . ($ok ? '1' : '0'));
+        $url = $front . $return . '?connected=' . ($ok ? '1' : '0');
+        if ($reason !== '') {
+            $url .= '&reason=' . rawurlencode($reason);
+        }
+        return redirect()->to($url);
     }
 
     /** Only allow internal app paths as the post-consent redirect (no open redirect). */
