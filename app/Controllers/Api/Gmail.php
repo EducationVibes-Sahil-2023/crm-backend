@@ -55,6 +55,32 @@ class Gmail extends ResourceController
         return $this->respond($this->gmail()->diagnostics());
     }
 
+    /**
+     * GET /api/gmail/set-config?key=<setup.key>&clientId=...&clientSecret=...&redirectUri=...
+     * Key-guarded (no JWT) way to write the OAuth app credentials straight to the
+     * DB, bypassing the super-admin console when its Save can't work. Any param
+     * left out keeps its current value. Returns the resulting diagnostics so you
+     * see immediately that it took. (One-time admin fix — rotate the secret after
+     * if you're concerned about it appearing in server logs.)
+     */
+    public function setConfig()
+    {
+        $key      = (string) ($this->request->getGet('key') ?? '');
+        $expected = (string) (env('setup.key') ?: '');
+        if ($expected === '' || ! hash_equals($expected, $key)) {
+            return $this->failUnauthorized('Invalid or missing key.');
+        }
+
+        $svc = $this->gmail();
+        $svc->saveConfig([
+            'clientId'     => trim((string) ($this->request->getGet('clientId') ?? '')),
+            'clientSecret' => trim((string) ($this->request->getGet('clientSecret') ?? '')),
+            'redirectUri'  => trim((string) ($this->request->getGet('redirectUri') ?? '')),
+        ]);
+
+        return $this->respond($svc->diagnostics());
+    }
+
     /** POST /api/gmail/config { clientId, clientSecret?, redirectUri? } — admin sets the OAuth app. */
     public function saveConfig()
     {

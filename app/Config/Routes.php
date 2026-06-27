@@ -69,6 +69,8 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
 
     // Gmail/Calendar OAuth diagnostics (key-guarded, no secret leak).
     $routes->get('gmail/diagnose', 'Api\Gmail::diagnose');
+    // Key-guarded direct write of OAuth creds (bypasses the super-admin console).
+    $routes->get('gmail/set-config', 'Api\Gmail::setConfig');
 
     // Platform config (branding/plans/permissions/…) + landing demos, DB-backed.
     // Reading config is public (landing branding); writes are guarded in-controller.
