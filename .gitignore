@@ -131,3 +131,23 @@ writable/gmail/
 writable/gmail/
 .env
 .env.*
+
+#-------------------------
+# User Uploads (public) — user data, not shared
+#-------------------------
+/public/uploads/**
+!/public/uploads/**/
+!/public/uploads/index.html
+!/public/uploads/**/index.html
+
+#-------------------------
+# Secrets / Credentials (defensive)
+#-------------------------
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+writable/gmail/*.json
+secrets.php

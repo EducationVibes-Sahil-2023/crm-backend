@@ -130,6 +130,9 @@ class Filters extends BaseFilters
                 'api/users/*',
                 'api/tenants',
                 'api/tenants/*',
+                // CRM leads (normalised domain)
+                'api/leads',
+                'api/leads/*',
                 // Generic JSON store (all app data)
                 'api/store',
                 'api/store/*',

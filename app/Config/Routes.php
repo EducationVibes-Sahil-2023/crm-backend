@@ -17,6 +17,9 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     $routes->post('auth/login', 'Api\Auth::login');
     $routes->get('auth/me', 'Api\Auth::me');
     $routes->post('auth/logout', 'Api\Auth::logout');
+    // Self-service password recovery (public — emails a short-lived reset link)
+    $routes->post('auth/forgot-password', 'Api\Auth::forgotPassword');
+    $routes->post('auth/reset-password', 'Api\Auth::resetPassword');
     // Two-step verification
     $routes->post('auth/2fa/verify', 'Api\Auth::verifyTwofa');   // completes a 2FA login (uses challenge, no bearer)
     $routes->post('auth/2fa/setup', 'Api\Auth::twofaSetup');     // authenticated
@@ -66,6 +69,9 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     $routes->post('platform/demos/book', 'Api\Platform::bookDemo');
     $routes->post('platform/demos', 'Api\Platform::saveDemos');
 
+    // CRM Leads — fully normalised domain (leads table)
+    $routes->resource('leads', ['controller' => 'Api\Leads']);
+
     // Generic per-workspace JSON store — replaces front-end localStorage.
     $routes->get('store', 'Api\Store::index');
     $routes->get('store/(:segment)', 'Api\Store::show/$1');
@@ -77,6 +83,7 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     $routes->post('tenants/provision', 'Api\Tenants::provision');
     $routes->post('tenants/update', 'Api\Tenants::updateClient');
     $routes->post('tenants/impersonate', 'Api\Tenants::impersonate');
+    $routes->post('tenants/reset-password', 'Api\Tenants::resetPassword');
     $routes->post('tenants/drop', 'Api\Tenants::drop');
 
     // Gmail — real OAuth connect, read inbox, send mail (tokens stored per user)

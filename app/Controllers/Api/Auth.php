@@ -3,6 +3,7 @@
 namespace App\Controllers\Api;
 
 use App\Libraries\Jwt;
+use App\Libraries\SmtpService;
 use App\Libraries\Totp;
 use App\Models\UserModel;
 use CodeIgniter\RESTful\ResourceController;
@@ -48,6 +49,97 @@ class Auth extends ResourceController
         }
 
         return $this->respond($this->session($users, $user));
+    }
+
+    /**
+     * POST /api/auth/forgot-password  { email }
+     * Self-service recovery. Emails a short-lived reset link to the account.
+     * Always responds success (never reveals whether an email is registered),
+     * so it can't be used to enumerate accounts.
+     */
+    public function forgotPassword()
+    {
+        $data  = $this->request->getJSON(true) ?? $this->request->getPost();
+        $email = trim((string) ($data['email'] ?? $data['identifier'] ?? ''));
+
+        $generic = ['ok' => true, 'message' => 'If an account exists for that email, a reset link is on its way.'];
+
+        if ($email === '') {
+            return $this->failValidationErrors('An email address is required.');
+        }
+
+        $users = new UserModel();
+        $user  = $users->findByIdentifier($email);
+
+        // Only mint + send for a real, active account — but the response is the
+        // same either way to avoid leaking which emails are registered.
+        if ($user !== null && (int) ($user['active'] ?? 1) === 1) {
+            // 30-minute single-purpose reset token (stateless, like the 2FA challenge).
+            $token   = Jwt::encode(['sub' => (int) $user['id'], 'purpose' => 'pwreset'], 1800);
+            $resetUrl = $this->resetUrl($token);
+
+            $name = trim((string) ($user['name'] ?? '')) ?: 'there';
+            $body = "Hi {$name},\r\n\r\n"
+                . "We received a request to reset your password. Click the link below to choose a new one:\r\n\r\n"
+                . "{$resetUrl}\r\n\r\n"
+                . "This link expires in 30 minutes. If you didn't request this, you can safely ignore this email — your password won't change.\r\n";
+
+            $sent = (new SmtpService())->send((string) $user['email'], 'Reset your password', $body);
+
+            // In non-production, hand back the link when mail isn't configured so
+            // the flow is testable locally. Never leaked in production.
+            if (! ($sent['ok'] ?? false) && ENVIRONMENT !== 'production') {
+                $generic['devResetUrl'] = $resetUrl;
+            }
+        }
+
+        return $this->respond($generic);
+    }
+
+    /**
+     * POST /api/auth/reset-password  { token, password }
+     * Completes recovery: validates the emailed token and sets the new password.
+     */
+    public function resetPassword()
+    {
+        $data     = $this->request->getJSON(true) ?? $this->request->getPost();
+        $token    = (string) ($data['token'] ?? '');
+        $password = (string) ($data['password'] ?? '');
+
+        $claims = Jwt::decode($token);
+        if ($claims === null || ($claims['purpose'] ?? '') !== 'pwreset') {
+            return $this->failUnauthorized('This reset link is invalid or has expired. Please request a new one.');
+        }
+        if (strlen($password) < 6) {
+            return $this->failValidationErrors('Your new password must be at least 6 characters.');
+        }
+
+        $users = new UserModel();
+        $user  = $users->find((int) ($claims['sub'] ?? 0));
+        if ($user === null || (int) ($user['active'] ?? 1) !== 1) {
+            return $this->failUnauthorized('Account unavailable. Please request a new reset link.');
+        }
+
+        $users->update($user['id'], ['password' => password_hash($password, PASSWORD_DEFAULT)]);
+
+        return $this->respond(['ok' => true, 'message' => 'Your password has been reset. You can now sign in.']);
+    }
+
+    /** Build the front-end reset URL, honouring the request Origin where present. */
+    private function resetUrl(string $token): string
+    {
+        $origin = trim((string) $this->request->getHeaderLine('Origin'));
+        if ($origin === '') {
+            $referer = (string) $this->request->getHeaderLine('Referer');
+            if ($referer !== '' && preg_match('#^https?://[^/]+#i', $referer, $m)) {
+                $origin = $m[0];
+            }
+        }
+        if ($origin === '') {
+            $origin = rtrim((string) (env('app.frontendURL') ?? 'http://localhost:3000'), '/');
+        }
+
+        return rtrim($origin, '/') . '/reset-password?token=' . rawurlencode($token);
     }
 
     /** POST /api/auth/2fa/verify  { challenge, code } — completes a 2FA login. */

@@ -228,6 +228,63 @@ class Tenants extends ResourceController
         ]);
     }
 
+    /**
+     * POST /api/tenants/reset-password
+     * { database | subdomain, password, adminEmail? }
+     * Super-admin recovery: resets a client admin's login password inside the
+     * tenant database and re-activates the account, so the platform owner can
+     * restore access for a locked-out client. Targets the given adminEmail, else
+     * the client's primary Administrator account.
+     */
+    public function resetPassword()
+    {
+        if (($guard = $this->requireAdmin()) !== null) {
+            return $guard;
+        }
+        $in     = $this->request->getJSON(true) ?? [];
+        $dbName = trim((string) ($in['database'] ?? ''));
+        if ($dbName === '' && ! empty($in['subdomain'])) {
+            $dbName = 'tenant_' . $this->slug((string) $in['subdomain']);
+        }
+        if (! preg_match('/^tenant_[a-z0-9_]+$/', $dbName)) {
+            return $this->failValidationErrors('A valid tenant database is required.');
+        }
+        $password = (string) ($in['password'] ?? '');
+        if (strlen($password) < 6) {
+            return $this->failValidationErrors('A new password (min 6 chars) is required.');
+        }
+        $email = strtolower(trim((string) ($in['adminEmail'] ?? '')));
+
+        try {
+            $tdb = $this->tenantDb($dbName);
+            // Target the requested admin email, else the primary Administrator
+            // account (active ones first, lowest id) — matching impersonate().
+            $admin = $email !== ''
+                ? $tdb->query('SELECT * FROM `users` WHERE email = ' . $tdb->escape($email) . ' LIMIT 1')->getRowArray()
+                : ($tdb->query("SELECT * FROM `users` WHERE role = 'Administrator' ORDER BY active DESC, id ASC LIMIT 1")->getRowArray()
+                    ?: $tdb->query('SELECT * FROM `users` ORDER BY id ASC LIMIT 1')->getRowArray());
+            if ($admin === null) {
+                $tdb->close();
+
+                return $this->failNotFound('This client has no matching login account.');
+            }
+            $tdb->query(
+                'UPDATE `users` SET password = ?, active = 1, updated_at = NOW() WHERE id = ?',
+                [password_hash($password, PASSWORD_DEFAULT), (int) $admin['id']],
+            );
+            $tdb->close();
+        } catch (\Throwable $e) {
+            return $this->fail('Could not reset the client password.', 502);
+        }
+
+        return $this->respond([
+            'reset'      => true,
+            'database'   => $dbName,
+            'adminEmail' => $admin['email'] ?? $email,
+            'adminName'  => $admin['name'] ?? '',
+        ]);
+    }
+
     /** POST /api/tenants/drop  { subdomain | database } — deprovision a client database. */
     public function drop()
     {
