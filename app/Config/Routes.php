@@ -32,6 +32,14 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     $routes->post('users/(:num)/reset-2fa', 'Api\Users::resetTwofa/$1');
     $routes->resource('users', ['controller' => 'Api\Users']);
 
+    // Team roster for chat / people pickers — any authenticated user (not admin).
+    $routes->get('team', 'Api\Users::team');
+
+    // Real 1:1 chat between workspace users (tenant-scoped).
+    $routes->get('chat/overview', 'Api\Chat::overview');
+    $routes->get('chat/messages', 'Api\Chat::messages');
+    $routes->post('chat/messages', 'Api\Chat::send');
+
     $routes->resource('tasks', ['controller' => 'Api\Tasks']);
 
     // Team directory (Users page) — per-tenant, DB-backed
@@ -109,6 +117,14 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     $routes->get('gmail/calendar', 'Api\Gmail::calendarEvents');
     $routes->post('gmail/calendar', 'Api\Gmail::createCalendarEvent');
     $routes->post('gmail/disconnect', 'Api\Gmail::disconnect');
+
+    // Web Push — VAPID key (public), subscribe/unsubscribe, and a self-test send.
+    $routes->get('push/vapid', 'Api\Push::vapid');            // public — needed before subscribing
+    $routes->post('push/subscribe', 'Api\Push::subscribe');   // auth
+    $routes->post('push/unsubscribe', 'Api\Push::unsubscribe'); // auth
+    $routes->post('push/test', 'Api\Push::test');             // auth
+    $routes->post('push/device', 'Api\Push::device');         // auth — native FCM/APNs token
+    $routes->post('push/device/remove', 'Api\Push::deviceRemove'); // auth
 
     // SMTP — relay configuration + sending (alternative to Gmail OAuth)
     $routes->get('smtp/config', 'Api\Smtp::getConfig');

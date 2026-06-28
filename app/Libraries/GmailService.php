@@ -44,15 +44,40 @@ class GmailService
 
     private const SETTINGS_KEY = 'gmail_oauth';
 
-    /** Effective config: the DB row wins, falling back to .env defaults. */
+    /**
+     * Effective config: the DB row wins. On the main/platform DB it falls back to
+     * the .env google.* defaults — but on a CLIENT database (tenant_*) it does
+     * NOT: each client must use their own Google OAuth app, never the platform's.
+     * The redirect URI defaults to this deployment's own callback when unset.
+     */
     private function loadConfig(): array
     {
-        $saved = Settings::get(self::SETTINGS_KEY) ?? [];
+        $saved    = Settings::get(self::SETTINGS_KEY) ?? [];
+        $onTenant = $this->onTenantDb();
+
+        $envId     = $onTenant ? '' : (string) (env('google.clientId') ?? '');
+        $envSecret = $onTenant ? '' : (string) (env('google.clientSecret') ?? '');
+        $envRedir  = $onTenant ? '' : (string) (env('google.redirectUri') ?? '');
+
+        $redirect = (string) ($saved['redirectUri'] ?? $envRedir);
+        if ($redirect === '') {
+            // Same callback for every client; each registers it in their own
+            // Google Cloud project. Derived from app.baseURL so it's correct per
+            // deployment (e.g. https://crm.example.com/api/gmail/callback).
+            $redirect = rtrim((string) base_url('gmail/callback'), '/');
+        }
+
         return [
-            'clientId'     => (string) ($saved['clientId']     ?? (env('google.clientId') ?? '')),
-            'clientSecret' => (string) ($saved['clientSecret'] ?? (env('google.clientSecret') ?? '')),
-            'redirectUri'  => (string) ($saved['redirectUri']  ?? (env('google.redirectUri') ?? 'http://localhost:8080/api/gmail/callback')),
+            'clientId'     => (string) ($saved['clientId']     ?? $envId),
+            'clientSecret' => (string) ($saved['clientSecret'] ?? $envSecret),
+            'redirectUri'  => $redirect,
         ];
+    }
+
+    /** True when the active DB connection points at a client (tenant_*) database. */
+    private function onTenantDb(): bool
+    {
+        return str_starts_with((string) (config('Database')->default['database'] ?? ''), 'tenant_');
     }
 
     /** Persist the OAuth app credentials from the admin UI. Secret kept if blank. */

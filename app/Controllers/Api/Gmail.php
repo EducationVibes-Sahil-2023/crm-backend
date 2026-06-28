@@ -19,7 +19,24 @@ class Gmail extends ResourceController
 
     private function gmail(): GmailService
     {
+        // Make sure the per-client (tenant) database is selected before the
+        // service reads its OAuth credentials, so each client uses their OWN
+        // Google app — never the platform's.
+        $this->applyTenantDb($this->tenant());
         return new GmailService();
+    }
+
+    /** Decoded JWT claims for this request (filter-set, else decoded from the bearer). */
+    private function claims(): array
+    {
+        $header = $this->request->getHeaderLine('Authorization');
+        if (preg_match('/Bearer\s+(.+)/i', $header, $m)) {
+            $c = Jwt::decode(trim($m[1]));
+            if (is_array($c)) {
+                return $c;
+            }
+        }
+        return [];
     }
 
     /**
@@ -33,23 +50,44 @@ class Gmail extends ResourceController
     private function userId(): string
     {
         $id = (string) ($this->request->jwtUserId ?? '');
-        if ($id !== '') {
-            return $id;
+        return $id !== '' ? $id : (string) ($this->claims()['sub'] ?? '');
+    }
+
+    /** The client workspace database this request belongs to (tenant_<slug>), if any. */
+    private function tenant(): string
+    {
+        $t = (string) ($this->request->jwtTenant ?? '');
+        return $t !== '' ? $t : (string) ($this->claims()['tenant'] ?? '');
+    }
+
+    /**
+     * Token-storage key, namespaced by tenant — so client A's user #5 and client
+     * B's user #5 never share a Google connection. Plain user id on the main DB.
+     */
+    private function scope(): string
+    {
+        $t = $this->tenant();
+        return $t !== '' ? $t . '__' . $this->userId() : $this->userId();
+    }
+
+    /**
+     * Point the default DB connection at the client's tenant database, so models
+     * (and the OAuth credential lookup) run against that client's isolated data.
+     * Mirrors the JwtAuth filter — needed here too because the bearer-less OAuth
+     * callback never runs the filter, and some deployments mount the API under a
+     * subfolder where the filter's URI patterns don't match.
+     */
+    private function applyTenantDb(string $tenant): void
+    {
+        if ($tenant !== '' && preg_match('/^tenant_[a-z0-9_]+$/', $tenant)) {
+            config('Database')->default['database'] = $tenant;
         }
-        $header = $this->request->getHeaderLine('Authorization');
-        if (preg_match('/Bearer\s+(.+)/i', $header, $m)) {
-            $claims = Jwt::decode(trim($m[1]));
-            if (is_array($claims)) {
-                return (string) ($claims['sub'] ?? '');
-            }
-        }
-        return '';
     }
 
     /** GET /api/gmail/status -> { configured, connected, email } */
     public function status()
     {
-        return $this->respond($this->gmail()->status($this->userId()));
+        return $this->respond($this->gmail()->status($this->scope()));
     }
 
     /** GET /api/gmail/config -> { configured, clientId, redirectUri, hasSecret } */
@@ -119,12 +157,13 @@ class Gmail extends ResourceController
     {
         $svc = $this->gmail();
         if (! $svc->isConfigured()) {
-            return $this->fail('Gmail is not configured. Set google.clientId / google.clientSecret in the backend .env.', 503);
+            return $this->fail('Google is not set up for this workspace yet. Add your OAuth Client ID and Secret in Admin Setup → Integrations → Google.', 503);
         }
-        // state carries the user id (so the bearer-less callback knows who
-        // connected) and the frontend path to return to after consent.
+        // state carries the user id + tenant (so the bearer-less callback knows
+        // who connected and which client database to write the token into) and
+        // the frontend path to return to after consent.
         $return = $this->safeReturn((string) $this->request->getGet('return'));
-        $state  = base64_encode($this->userId() . '|' . bin2hex(random_bytes(8)) . '|' . $return);
+        $state  = base64_encode($this->userId() . '|' . bin2hex(random_bytes(8)) . '|' . $return . '|' . $this->tenant());
         return $this->respond(['url' => $svc->authUrl($state)]);
     }
 
@@ -136,6 +175,7 @@ class Gmail extends ResourceController
         $front = (string) (env('app.frontendUrl') ?? 'http://localhost:3000');
 
         $userId = '';
+        $tenant = '';
         $return = '/gmail';
         if ($state !== '') {
             $decoded = base64_decode($state, true);
@@ -143,11 +183,18 @@ class Gmail extends ResourceController
                 $parts  = explode('|', $decoded);
                 $userId = $parts[0];
                 $return = $this->safeReturn($parts[2] ?? '');
+                $tenant = (string) ($parts[3] ?? '');
             }
         }
 
-        $svc    = $this->gmail();
-        $ok     = $code !== '' && $userId !== '' && $svc->exchangeCode($userId, $code);
+        // Re-select the client's database BEFORE the service loads credentials, so
+        // the code is exchanged with that client's own Google app, and the token
+        // is stored under the tenant-namespaced key.
+        $this->applyTenantDb($tenant);
+        $scope  = $tenant !== '' ? $tenant . '__' . $userId : $userId;
+
+        $svc    = new GmailService();
+        $ok     = $code !== '' && $userId !== '' && $svc->exchangeCode($scope, $code);
         $reason = $ok ? '' : ($svc->lastError() ?: ($code === '' ? 'no_code' : ($userId === '' ? 'no_user' : 'failed')));
 
         $url = $front . $return . '?connected=' . ($ok ? '1' : '0');
@@ -170,7 +217,7 @@ class Gmail extends ResourceController
     public function messages()
     {
         $max = (int) ($this->request->getGet('max') ?? 20);
-        return $this->respond($this->gmail()->listInbox($this->userId(), max(1, min(50, $max))));
+        return $this->respond($this->gmail()->listInbox($this->scope(), max(1, min(50, $max))));
     }
 
     /** GET /api/gmail/message/$id -> { id, from, to, subject, date, body } */
@@ -179,7 +226,7 @@ class Gmail extends ResourceController
         if (! $id) {
             return $this->failValidationErrors('A message id is required.');
         }
-        return $this->respond($this->gmail()->getMessage($this->userId(), (string) $id));
+        return $this->respond($this->gmail()->getMessage($this->scope(), (string) $id));
     }
 
     /** POST /api/gmail/send  { to, subject, body } */
@@ -191,7 +238,7 @@ class Gmail extends ResourceController
             return $this->failValidationErrors('A recipient ("to") is required.');
         }
         $res = $this->gmail()->send(
-            $this->userId(),
+            $this->scope(),
             $to,
             (string) ($in['subject'] ?? ''),
             (string) ($in['body'] ?? ''),
@@ -207,7 +254,7 @@ class Gmail extends ResourceController
         $max     = (int) ($this->request->getGet('max') ?? 50);
         $timeMin = (string) ($this->request->getGet('timeMin') ?? '');
         $timeMax = (string) ($this->request->getGet('timeMax') ?? '');
-        return $this->respond($this->gmail()->listCalendarEvents($this->userId(), max(1, min(250, $max)), $timeMin, $timeMax));
+        return $this->respond($this->gmail()->listCalendarEvents($this->scope(), max(1, min(250, $max)), $timeMin, $timeMax));
     }
 
     /** POST /api/gmail/calendar { summary, start, end, description?, attendees? } — create an event + Meet link. */
@@ -217,7 +264,7 @@ class Gmail extends ResourceController
         if (trim((string) ($in['summary'] ?? '')) === '') {
             return $this->failValidationErrors('A meeting title ("summary") is required.');
         }
-        $res = $this->gmail()->createCalendarEvent($this->userId(), $in);
+        $res = $this->gmail()->createCalendarEvent($this->scope(), $in);
         return ! empty($res['created'])
             ? $this->respondCreated($res)
             : $this->fail('Could not create the calendar event. Reconnect Google and try again.', 502);
@@ -226,7 +273,7 @@ class Gmail extends ResourceController
     /** POST /api/gmail/disconnect */
     public function disconnect()
     {
-        $this->gmail()->disconnect($this->userId());
+        $this->gmail()->disconnect($this->scope());
         return $this->respond(['disconnected' => true]);
     }
 }

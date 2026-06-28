@@ -128,6 +128,9 @@ class Filters extends BaseFilters
                 'api/ai/chat',
                 'api/users',
                 'api/users/*',
+                'api/team',
+                'api/chat/overview',
+                'api/chat/messages',
                 'api/tenants',
                 'api/tenants/*',
                 // CRM leads (normalised domain)
@@ -149,6 +152,12 @@ class Filters extends BaseFilters
                 'api/smtp/config',
                 'api/smtp/test',
                 'api/smtp/send',
+                // Web Push — subscribe/unsubscribe/test (push/vapid stays public)
+                'api/push/subscribe',
+                'api/push/unsubscribe',
+                'api/push/test',
+                'api/push/device',
+                'api/push/device/remove',
             ],
         ],
     ];

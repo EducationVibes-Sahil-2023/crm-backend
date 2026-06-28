@@ -3,6 +3,7 @@
 namespace App\Controllers\Api;
 
 use App\Libraries\Jwt;
+use App\Libraries\Settings;
 use App\Models\UserModel;
 use CodeIgniter\RESTful\ResourceController;
 
@@ -27,6 +28,24 @@ class Users extends ResourceController
         $rows = $this->model->orderBy('id', 'ASC')->findAll();
 
         return $this->respond(array_map(fn ($u) => $this->model->publicUser($u), $rows));
+    }
+
+    /**
+     * GET /api/team — lightweight roster of the workspace's active login
+     * accounts, available to ANY authenticated user (not just admins). Powers
+     * the Chat contact list and people pickers. Never leaks passwords/2FA.
+     */
+    public function team()
+    {
+        $rows = $this->model->where('active', 1)->orderBy('name', 'ASC')->findAll();
+
+        // The platform super-admin must never appear as a chattable contact.
+        // It isn't normally a `users` row, but exclude its email defensively.
+        $superEmail = strtolower(trim((string) ((Settings::get('superadmin')['email'] ?? null)
+            ?: (env('superadmin.email') ?: 'superadmin@crm-cloud.app'))));
+        $rows = array_filter($rows, static fn ($u) => strtolower(trim((string) ($u['email'] ?? ''))) !== $superEmail);
+
+        return $this->respond(array_values(array_map(fn ($u) => $this->model->publicUser($u), $rows)));
     }
 
     /** POST /api/users */
