@@ -2,6 +2,7 @@
 
 namespace App\Controllers\Api;
 
+use App\Libraries\Jwt;
 use CodeIgniter\RESTful\ResourceController;
 use Config\Database;
 use Throwable;
@@ -155,10 +156,32 @@ class Chat extends ResourceController
         ]);
     }
 
-    /** The authenticated user id from the JwtAuth filter. */
+    /**
+     * The authenticated user id. Prefers the JwtAuth filter's value, but falls
+     * back to decoding the Bearer token directly — so chat still works when the
+     * filter's URI patterns don't match the routes (e.g. the API is mounted under
+     * a subfolder on production). Also re-selects the caller's tenant database so
+     * chat is correctly scoped to their workspace's users.
+     */
     private function me(): ?int
     {
-        $id = $this->request->jwtUserId ?? null;
+        $claims = [];
+        $header = $this->request->getHeaderLine('Authorization');
+        if (preg_match('/Bearer\s+(.+)/i', $header, $m)) {
+            $c = Jwt::decode(trim($m[1]));
+            if (is_array($c)) {
+                $claims = $c;
+            }
+        }
+
+        // Point the default connection at the client's database before any query,
+        // mirroring the JwtAuth filter (needed when the filter didn't run).
+        $tenant = (string) ($this->request->jwtTenant ?? ($claims['tenant'] ?? ''));
+        if ($tenant !== '' && preg_match('/^tenant_[a-z0-9_]+$/', $tenant)) {
+            config('Database')->default['database'] = $tenant;
+        }
+
+        $id = $this->request->jwtUserId ?? ($claims['sub'] ?? null);
 
         return $id !== null && (int) $id > 0 ? (int) $id : null;
     }

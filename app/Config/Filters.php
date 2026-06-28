@@ -131,6 +131,8 @@ class Filters extends BaseFilters
                 'api/team',
                 'api/chat/overview',
                 'api/chat/messages',
+                'api/calls',
+                'api/calls/*',
                 'api/tenants',
                 'api/tenants/*',
                 // CRM leads (normalised domain)

@@ -6,6 +6,7 @@ use App\Libraries\Jwt;
 use App\Libraries\Settings;
 use App\Models\UserModel;
 use CodeIgniter\RESTful\ResourceController;
+use Config\Database;
 
 /**
  * Admin management of real login accounts. Backs the "Accounts & Security"
@@ -37,7 +38,12 @@ class Users extends ResourceController
      */
     public function team()
     {
-        $rows = $this->model->where('active', 1)->orderBy('name', 'ASC')->findAll();
+        // Read the roster from the CALLER'S workspace database, so a client only
+        // ever sees their own users. Uses a tenant-scoped connection directly
+        // (robust even when the JwtAuth filter's URI patterns don't match the
+        // routes, e.g. the API mounted under a subfolder on production).
+        $db   = $this->tenantDb();
+        $rows = $db->table('users')->where('active', 1)->orderBy('name', 'ASC')->get()->getResultArray();
 
         // The platform super-admin must never appear as a chattable contact.
         // It isn't normally a `users` row, but exclude its email defensively.
@@ -46,6 +52,34 @@ class Users extends ResourceController
         $rows = array_filter($rows, static fn ($u) => strtolower(trim((string) ($u['email'] ?? ''))) !== $superEmail);
 
         return $this->respond(array_values(array_map(fn ($u) => $this->model->publicUser($u), $rows)));
+    }
+
+    /**
+     * Connection to the caller's tenant database (tenant_<slug>), or the default
+     * connection when the request carries no tenant. The tenant is taken from the
+     * JwtAuth filter, falling back to decoding the Bearer token directly.
+     */
+    private function tenantDb(): \CodeIgniter\Database\BaseConnection
+    {
+        $tenant = (string) ($this->request->jwtTenant ?? '');
+        if ($tenant === '') {
+            $header = $this->request->getHeaderLine('Authorization');
+            if (preg_match('/Bearer\s+(.+)/i', $header, $m)) {
+                $claims = Jwt::decode(trim($m[1]));
+                if (is_array($claims)) {
+                    $tenant = (string) ($claims['tenant'] ?? '');
+                }
+            }
+        }
+        if ($tenant !== '' && preg_match('/^tenant_[a-z0-9_]+$/', $tenant)) {
+            $cfg             = (array) (new Database())->default;
+            $cfg['database'] = $tenant;
+            $cfg['DBDebug']  = false;
+
+            return Database::connect($cfg, false);
+        }
+
+        return Database::connect();
     }
 
     /** POST /api/users */

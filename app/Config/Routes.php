@@ -40,6 +40,9 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     $routes->get('chat/messages', 'Api\Chat::messages');
     $routes->post('chat/messages', 'Api\Chat::send');
 
+    // Call Tracker — real device call rows (per-user, tenant-scoped).
+    $routes->resource('calls', ['controller' => 'Api\Calls']);
+
     $routes->resource('tasks', ['controller' => 'Api\Tasks']);
 
     // Team directory (Users page) — per-tenant, DB-backed
