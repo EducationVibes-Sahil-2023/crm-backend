@@ -73,6 +73,7 @@ class Tenants extends ResourceController
                 'users'      => $counts[$name] ?? 0,
                 'exists'     => in_array($name, $dbs, true),
                 'createdAt'  => $r['created_at'] ?? null,
+                'lastLoginAt' => $r['last_login_at'] ?? null,
             ];
         }
         // Databases that exist but were never registered (created out-of-band).
@@ -92,6 +93,7 @@ class Tenants extends ResourceController
                     'users'      => $counts[$name] ?? 0,
                     'exists'     => true,
                     'createdAt'  => null,
+                    'lastLoginAt' => null,
                 ];
             }
         }

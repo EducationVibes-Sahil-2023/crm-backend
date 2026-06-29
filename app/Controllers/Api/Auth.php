@@ -28,6 +28,19 @@ class Auth extends ResourceController
         $users = new UserModel();
         $user  = $users->findByIdentifier($identifier);
 
+        // If the account isn't in the platform (default) DB, it may be a CLIENT
+        // logging into their own tenant workspace — resolve them there. This is a
+        // real client login (not super-admin impersonation), so it stamps the
+        // tenant's last-login for the super-admin console.
+        $tenant = null;
+        if ($user === null) {
+            $found = $this->findTenantUser($identifier);
+            if ($found !== null) {
+                $user   = $found['user'];
+                $tenant = $found['db'];
+            }
+        }
+
         if ($user === null || ! password_verify($password, $user['password'])) {
             return $this->failUnauthorized('Invalid email or password.');
         }
@@ -38,8 +51,13 @@ class Auth extends ResourceController
 
         // Two-step verification: hand back a short-lived challenge instead of a
         // session token. The client then posts the authenticator code to /verify.
+        // Carry the tenant so /verify can complete the login in the right DB.
         if ((int) ($user['twofa_enabled'] ?? 0) === 1) {
-            $challenge = Jwt::encode(['sub' => (int) $user['id'], 'purpose' => '2fa'], 300);
+            $claims = ['sub' => (int) $user['id'], 'purpose' => '2fa'];
+            if ($tenant !== null) {
+                $claims['tenant'] = $tenant;
+            }
+            $challenge = Jwt::encode($claims, 300);
 
             return $this->respond([
                 'twofa_required' => true,
@@ -48,7 +66,9 @@ class Auth extends ResourceController
             ]);
         }
 
-        return $this->respond($this->session($users, $user));
+        $this->stampTenantLogin($tenant);
+
+        return $this->respond($this->session($users, $user, $tenant));
     }
 
     /**
@@ -154,8 +174,22 @@ class Auth extends ResourceController
             return $this->failUnauthorized('Your verification session expired. Please sign in again.');
         }
 
-        $users = new UserModel();
-        $user  = $users->find((int) ($claims['sub'] ?? 0));
+        // The challenge may be for a CLIENT logging into their tenant workspace —
+        // resolve the user in the right database.
+        $tenant = (string) ($claims['tenant'] ?? '') ?: null;
+        $users  = new UserModel();
+        if ($tenant !== null && preg_match('/^tenant_[a-z0-9_]+$/', $tenant)) {
+            try {
+                $tdb  = $this->tenantDb($tenant);
+                $user = $tdb->query('SELECT * FROM `users` WHERE id = ? LIMIT 1', [(int) ($claims['sub'] ?? 0)])->getRowArray();
+                $tdb->close();
+            } catch (\Throwable $e) {
+                return $this->failUnauthorized('Account unavailable. Please sign in again.');
+            }
+        } else {
+            $tenant = null;
+            $user   = $users->find((int) ($claims['sub'] ?? 0));
+        }
         if ($user === null || (int) ($user['active'] ?? 1) !== 1) {
             return $this->failUnauthorized('Account unavailable. Please sign in again.');
         }
@@ -164,7 +198,9 @@ class Auth extends ResourceController
             return $this->failUnauthorized('Incorrect verification code.');
         }
 
-        return $this->respond($this->session($users, $user));
+        $this->stampTenantLogin($tenant);
+
+        return $this->respond($this->session($users, $user, $tenant));
     }
 
     /** GET /api/auth/me  (Authorization: Bearer <jwt>) — also the liveness/active check. */
@@ -239,18 +275,107 @@ class Auth extends ResourceController
 
     // ---- helpers ----
 
-    /** Issue a session token + public user payload. */
-    private function session(UserModel $users, array $user): array
+    /** Issue a session token + public user payload. A tenant client's token
+     *  carries its `tenant` claim so every later request routes to its DB. */
+    private function session(UserModel $users, array $user, ?string $tenant = null): array
     {
-        $token = Jwt::encode([
+        $claims = [
             'sub'      => (int) $user['id'],
             'name'     => $user['name'],
             'username' => $user['username'],
             'email'    => $user['email'],
             'role'     => $user['role'] ?? 'Member',
-        ]);
+        ];
+        if ($tenant !== null) {
+            $claims['tenant'] = $tenant;
+        }
 
-        return ['token' => $token, 'user' => $users->publicUser($user)];
+        return ['token' => Jwt::encode($claims), 'user' => $users->publicUser($user)];
+    }
+
+    /** Open a connection to a specific tenant database (default credentials). */
+    private function tenantDb(string $dbName): \CodeIgniter\Database\BaseConnection
+    {
+        $cfg             = (array) (new \Config\Database())->default;
+        $cfg['database'] = $dbName;
+        $cfg['DBDebug']  = false;
+
+        return \Config\Database::connect($cfg, false);
+    }
+
+    /**
+     * Resolve a login that isn't in the platform (default) database to a client
+     * tenant workspace. Fast path: the tenants registry's admin_email; fallback:
+     * scan the tenant databases for a user with that email/username.
+     *
+     * @return array{db:string,user:array}|null
+     */
+    private function findTenantUser(string $identifier): ?array
+    {
+        $root  = \Config\Database::connect();
+        $ident = strtolower($identifier);
+
+        $candidates = [];
+        // 1. Registry fast path — the client admin logs in with their admin_email.
+        try {
+            $rows = $root->query(
+                'SELECT db_name FROM `tenants` WHERE LOWER(admin_email) = ? AND active = 1',
+                [$ident],
+            )->getResultArray();
+            foreach ($rows as $r) {
+                $candidates[] = (string) $r['db_name'];
+            }
+        } catch (\Throwable $e) {
+            // registry missing — fall through to a scan
+        }
+        // 2. Fallback — scan every tenant database for a matching user.
+        if ($candidates === []) {
+            try {
+                foreach ($root->query("SHOW DATABASES LIKE 'tenant\\_%'")->getResultArray() as $r) {
+                    $candidates[] = array_values($r)[0];
+                }
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        foreach ($candidates as $dbName) {
+            if (! preg_match('/^tenant_[a-z0-9_]+$/', (string) $dbName)) {
+                continue;
+            }
+            try {
+                $tdb  = $this->tenantDb($dbName);
+                $user = $tdb->query(
+                    'SELECT * FROM `users` WHERE email = ? OR username = ? LIMIT 1',
+                    [$identifier, $identifier],
+                )->getRowArray();
+                $tdb->close();
+                if ($user !== null) {
+                    return ['db' => $dbName, 'user' => $user];
+                }
+            } catch (\Throwable $e) {
+                // db unreachable / no users table — try the next candidate
+            }
+        }
+
+        return null;
+    }
+
+    /** Stamp a tenant's last (real) client login in the registry. No-op for
+     *  platform logins and super-admin impersonation. */
+    private function stampTenantLogin(?string $dbName): void
+    {
+        if ($dbName === null) {
+            return;
+        }
+        try {
+            \Config\Database::connect()->query(
+                'UPDATE `tenants` SET last_login_at = NOW() WHERE db_name = ?',
+                [$dbName],
+            );
+        } catch (\Throwable $e) {
+            // registry/column missing — ignore
+        }
     }
 
     private function currentUser(): ?array

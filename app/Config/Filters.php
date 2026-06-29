@@ -133,11 +133,18 @@ class Filters extends BaseFilters
                 'api/chat/messages',
                 'api/calls',
                 'api/calls/*',
+                'api/payments',
+                'api/payments/*',
                 'api/tenants',
                 'api/tenants/*',
                 // CRM leads (normalised domain)
                 'api/leads',
                 'api/leads/*',
+                // Activity log (audit trail)
+                'api/activity',
+                // Vendors (supplier directory)
+                'api/vendors',
+                'api/vendors/*',
                 // Generic JSON store (all app data)
                 'api/store',
                 'api/store/*',

@@ -43,6 +43,12 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     // Call Tracker — real device call rows (per-user, tenant-scoped).
     $routes->resource('calls', ['controller' => 'Api\Calls']);
 
+    // Subscription payments via Razorpay (per-tenant billing records).
+    $routes->get('payments/config', 'Api\Payments::config');
+    $routes->post('payments/order', 'Api\Payments::order');
+    $routes->post('payments/verify', 'Api\Payments::verify');
+    $routes->get('payments', 'Api\Payments::index');
+
     $routes->resource('tasks', ['controller' => 'Api\Tasks']);
 
     // Team directory (Users page) — per-tenant, DB-backed
@@ -93,6 +99,14 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
 
     // CRM Leads — fully normalised domain (leads table)
     $routes->resource('leads', ['controller' => 'Api\Leads']);
+
+    // Activity log — workspace audit trail (activity_log table)
+    $routes->get('activity', 'Api\ActivityLog::index');
+    $routes->post('activity', 'Api\ActivityLog::create');
+    $routes->delete('activity', 'Api\ActivityLog::clear');
+
+    // Vendors — supplier directory (vendors table)
+    $routes->resource('vendors', ['controller' => 'Api\Vendors']);
 
     // Generic per-workspace JSON store — replaces front-end localStorage.
     $routes->get('store', 'Api\Store::index');
