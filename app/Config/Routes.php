@@ -41,6 +41,9 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     $routes->post('chat/messages', 'Api\Chat::send');
 
     // Call Tracker — real device call rows (per-user, tenant-scoped).
+    // Team-wide analytics must be registered BEFORE the resource route so it is
+    // not swallowed by calls/(:id) → show.
+    $routes->get('calls/analytics', 'Api\Calls::analytics');
     $routes->resource('calls', ['controller' => 'Api\Calls']);
 
     // Subscription payments via Razorpay (per-tenant billing records).
