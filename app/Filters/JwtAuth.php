@@ -23,13 +23,17 @@ class JwtAuth implements FilterInterface
         $claims = $token !== '' ? Jwt::decode($token) : null;
 
         if ($claims === null) {
-            return Services::response()
+            // A before-filter short-circuit skips the CORS *after* filter, so we
+            // must add the CORS header here — otherwise the browser blocks the 401
+            // and the fetch fails with a generic "Failed to fetch" (looks like the
+            // backend is down) instead of surfacing a clean "please sign in".
+            return $this->withCors($request, Services::response()
                 ->setStatusCode(ResponseInterface::HTTP_UNAUTHORIZED)
                 ->setJSON([
                     'status'   => 401,
                     'error'    => 401,
                     'messages' => ['error' => 'Authentication required. Please sign in again.'],
-                ]);
+                ]));
         }
 
         // Make the authenticated user id available to controllers if needed.
@@ -52,5 +56,40 @@ class JwtAuth implements FilterInterface
     public function after(RequestInterface $request, ResponseInterface $response, $arguments = null)
     {
         // no-op
+    }
+
+    /**
+     * Echo the request Origin on the response when it matches the CORS config,
+     * mirroring Config\Cors so a short-circuited 401 is still readable by the
+     * browser (the framework CORS *after* filter never runs on a short-circuit).
+     */
+    private function withCors(RequestInterface $request, ResponseInterface $response): ResponseInterface
+    {
+        $origin = $request->getHeaderLine('Origin');
+        if ($origin === '') {
+            return $response;
+        }
+
+        $cfg     = config('Cors')->default ?? [];
+        $allowed = in_array($origin, $cfg['allowedOrigins'] ?? [], true);
+        if (! $allowed) {
+            foreach (($cfg['allowedOriginsPatterns'] ?? []) as $pattern) {
+                if (preg_match('#\A' . $pattern . '\z#', $origin) === 1) {
+                    $allowed = true;
+                    break;
+                }
+            }
+        }
+        if (! $allowed) {
+            return $response;
+        }
+
+        $response->setHeader('Access-Control-Allow-Origin', $origin);
+        $response->appendHeader('Vary', 'Origin');
+        if (! empty($cfg['supportsCredentials'])) {
+            $response->setHeader('Access-Control-Allow-Credentials', 'true');
+        }
+
+        return $response;
     }
 }

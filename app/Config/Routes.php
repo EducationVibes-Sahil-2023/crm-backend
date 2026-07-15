@@ -117,6 +117,16 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     $routes->put('store/(:segment)', 'Api\Store::update/$1');
     $routes->delete('store/(:segment)', 'Api\Store::delete/$1');
 
+    // Super-admin database inspector + backups (self-guarded to the platform admin)
+    $routes->get('db/databases', 'Api\DbAdmin::databases');
+    $routes->get('db/overview', 'Api\DbAdmin::overview');
+    $routes->get('db/table', 'Api\DbAdmin::table');
+    $routes->get('db/data', 'Api\DbAdmin::data');
+    $routes->get('db/schedule', 'Api\DbAdmin::getSchedule');
+    $routes->post('db/schedule', 'Api\DbAdmin::saveSchedule');
+    $routes->get('db/backups', 'Api\DbAdmin::backups');
+    $routes->post('db/backup', 'Api\DbAdmin::runBackup');
+
     // Multi-tenant provisioning — a dedicated database per client workspace
     $routes->get('tenants', 'Api\Tenants::index');
     $routes->post('tenants/provision', 'Api\Tenants::provision');
