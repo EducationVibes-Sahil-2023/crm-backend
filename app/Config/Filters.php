@@ -145,6 +145,8 @@ class Filters extends BaseFilters
                 // Vendors (supplier directory)
                 'api/vendors',
                 'api/vendors/*',
+                // Lead-setup / lookup lists (workspace-scoped)
+                'api/config/*',
                 // Generic JSON store (all app data)
                 'api/store',
                 'api/store/*',

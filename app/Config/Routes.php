@@ -111,6 +111,14 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     // Vendors — supplier directory (vendors table)
     $routes->resource('vendors', ['controller' => 'Api\Vendors']);
 
+    // Lead-setup / lookup lists (status, source, type, sub-status, …) — real
+    // rows in the workspace DB. Replaces the front-end localStorage config.
+    $routes->post('config/(:segment)/reorder', 'Api\Config::reorderKind/$1');
+    $routes->get('config/(:segment)', 'Api\Config::listKind/$1');
+    $routes->post('config/(:segment)', 'Api\Config::createKind/$1');
+    $routes->put('config/(:segment)/(:num)', 'Api\Config::updateKind/$1/$2');
+    $routes->delete('config/(:segment)/(:num)', 'Api\Config::removeKind/$1/$2');
+
     // Generic per-workspace JSON store — replaces front-end localStorage.
     $routes->get('store', 'Api\Store::index');
     $routes->get('store/(:segment)', 'Api\Store::show/$1');
