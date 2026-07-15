@@ -82,6 +82,8 @@ $routes->group('api', ['filter' => 'cors'], static function ($routes) {
     $routes->post('super-admin/login', 'Api\SuperAdmin::login');         // validate + mint JWT
     $routes->post('super-admin/token', 'Api\SuperAdmin::token');         // back-compat alias
     $routes->post('super-admin/credentials', 'Api\SuperAdmin::credentials'); // change creds (re-auth)
+    $routes->get('super-admin/profile', 'Api\SuperAdmin::profile');       // presentational profile (JWT-guarded)
+    $routes->post('super-admin/profile', 'Api\SuperAdmin::saveProfile');  // save profile (JWT-guarded)
 
     // Web-triggered deploy bootstrap (no-CLI): create DB + run migrations + seed.
     // Guarded by ?key=<setup.key>. Hit it after each deploy to auto-update schema.

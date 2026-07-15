@@ -102,7 +102,57 @@ class SuperAdmin extends ResourceController
         return $this->respond(['ok' => true, 'email' => $newEmail, 'name' => $newName]);
     }
 
+    /**
+     * GET /api/super-admin/profile -> { avatar, title, phone }
+     * The super-admin's presentational profile (photo/title/phone), persisted
+     * globally in the DB (`settings.superadmin_profile`) so it follows the owner
+     * across browsers/devices instead of living in one browser's localStorage.
+     */
+    public function profile()
+    {
+        if (! $this->authed()) {
+            return $this->failUnauthorized('Super admin authentication required.');
+        }
+        $p = Settings::get('superadmin_profile') ?: [];
+
+        return $this->respond([
+            'avatar' => $p['avatar'] ?? null,
+            'title'  => (string) ($p['title'] ?? ''),
+            'phone'  => (string) ($p['phone'] ?? ''),
+        ]);
+    }
+
+    /**
+     * POST /api/super-admin/profile  { avatar?, title?, phone? } -> { ok }
+     * Persist the super-admin's presentational profile. Requires a super-admin JWT.
+     */
+    public function saveProfile()
+    {
+        if (! $this->authed()) {
+            return $this->failUnauthorized('Super admin authentication required.');
+        }
+        $in = $this->request->getJSON(true) ?: [];
+
+        Settings::set('superadmin_profile', [
+            'avatar' => (isset($in['avatar']) && is_string($in['avatar']) && $in['avatar'] !== '') ? $in['avatar'] : null,
+            'title'  => (string) ($in['title'] ?? ''),
+            'phone'  => (string) ($in['phone'] ?? ''),
+        ]);
+
+        return $this->respond(['ok' => true]);
+    }
+
     // ---- helpers ----
+
+    /** True when the request carries a valid super-admin JWT (role claim). */
+    private function authed(): bool
+    {
+        $header = $this->request->getHeaderLine('Authorization');
+        $tok    = preg_match('/Bearer\s+(.+)/i', $header, $m) ? trim($m[1]) : '';
+        $claims = $tok !== '' ? Jwt::decode($tok) : null;
+
+        return ($claims['role'] ?? '') === 'super-admin';
+    }
 
     /**
      * Resolve the expected super-admin identity: DB (`settings.superadmin`) first,
