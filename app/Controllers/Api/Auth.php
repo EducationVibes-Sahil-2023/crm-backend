@@ -25,23 +25,30 @@ class Auth extends ResourceController
             return $this->failValidationErrors('Email and password are required.');
         }
 
-        $users = new UserModel();
-        $user  = $users->findByIdentifier($identifier);
-
-        // If the account isn't in the platform (default) DB, it may be a CLIENT
-        // logging into their own tenant workspace — resolve them there. This is a
-        // real client login (not super-admin impersonation), so it stamps the
-        // tenant's last-login for the super-admin console.
+        $users  = new UserModel();
         $tenant = null;
-        if ($user === null) {
+
+        // 1. Try the platform (default) database first. A match only counts if the
+        //    password verifies.
+        $user   = $users->findByIdentifier($identifier);
+        $authed = $user !== null && password_verify($password, (string) $user['password']);
+
+        // 2. If that didn't authenticate, resolve the login against the CLIENT
+        //    databases, so a client always signs in against their OWN tenant DB —
+        //    even when their email/username collides with a platform account (in
+        //    which case the main-DB match above failed the password check). This is
+        //    a real client login (not super-admin impersonation), so it stamps the
+        //    tenant's last-login for the super-admin console.
+        if (! $authed) {
             $found = $this->findTenantUser($identifier);
-            if ($found !== null) {
+            if ($found !== null && password_verify($password, (string) $found['user']['password'])) {
                 $user   = $found['user'];
                 $tenant = $found['db'];
+                $authed = true;
             }
         }
 
-        if ($user === null || ! password_verify($password, $user['password'])) {
+        if (! $authed || $user === null) {
             return $this->failUnauthorized('Invalid email or password.');
         }
 
@@ -345,9 +352,11 @@ class Auth extends ResourceController
             }
             try {
                 $tdb  = $this->tenantDb($dbName);
+                // Case-insensitive so a client matches their account regardless of
+                // how they type their email/username (emails aren't case-sensitive).
                 $user = $tdb->query(
-                    'SELECT * FROM `users` WHERE email = ? OR username = ? LIMIT 1',
-                    [$identifier, $identifier],
+                    'SELECT * FROM `users` WHERE LOWER(email) = ? OR LOWER(username) = ? LIMIT 1',
+                    [$ident, $ident],
                 )->getRowArray();
                 $tdb->close();
                 if ($user !== null) {
