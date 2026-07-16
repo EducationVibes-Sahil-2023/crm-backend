@@ -47,7 +47,11 @@ class JwtAuth implements FilterInterface
         // mutating the default group's database here means the first model
         // connect() lands on the tenant database.
         $tenant = (string) ($claims['tenant'] ?? '');
-        if ($tenant !== '' && preg_match('/^tenant_[a-z0-9]+$/', $tenant)) {
+        // NOTE: the slug part may contain underscores (e.g. tenant_acme_corp when a
+        // client is provisioned with an explicit multi-word db name). The pattern
+        // MUST allow "_" — matching the validation used everywhere else — or the DB
+        // switch silently no-ops and the client's data lands in the MAIN database.
+        if ($tenant !== '' && preg_match('/^tenant_[a-z0-9_]+$/', $tenant)) {
             config('Database')->default['database'] = $tenant;
             $request->jwtTenant = $tenant;
         }

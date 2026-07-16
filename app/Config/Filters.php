@@ -120,6 +120,11 @@ class Filters extends BaseFilters
                 'api/directory/*',
                 'api/assets',
                 'api/assets/*',
+                // Inventory — stock items + movements + assignments. MUST be here so
+                // the JWT filter runs and points the connection at the client's
+                // tenant DB; without it, inventory writes leak into the main DB.
+                'api/inventory',
+                'api/inventory/*',
                 'api/auth/me',
                 'api/auth/logout',
                 'api/auth/2fa/setup',
